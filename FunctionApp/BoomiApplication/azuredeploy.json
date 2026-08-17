@@ -44,8 +44,8 @@
     "appServicePlanName": "[concat('Boomi-', parameters('accountId'), '-plan')]",
     "storageAccountName": "[toLower(take(concat('boomi', uniqueString(resourceGroup().id, parameters('accountId'))), 24))]",
     "appInsightsName": "[concat('Boomi-', parameters('accountId'), '-ai')]",
-    "dceName": "[concat('Boomi-', parameters('accountId'), '-dce')]",
-    "dcrName": "[concat('Boomi-', parameters('accountId'), '-dcr')]",
+    "dceName": "BoomiApp-DCE",
+    "dcrName": "BoomiApp-DCR",
     "tableName": "BoomiAppAuditEvents_CL",
     "streamName": "Custom-BoomiAppEvents",
     "workspaceName": "[last(split(parameters('workspaceResourceId'), '/'))]",
@@ -232,7 +232,7 @@
   "outputs": {
     "functionAppName": {
       "type": "string",
-      "value": "[variables('functionAppName')]"
+      "value": "[variables('functionAppName')]"  
     },
     "dceEndpoint": {
       "type": "string",
