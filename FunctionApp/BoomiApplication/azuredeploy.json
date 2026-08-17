@@ -1,0 +1,250 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "accountId": {
+      "type": "string",
+      "metadata": {
+        "description": "Boomi Account ID. Used to build resource names — must contain only letters, numbers, and hyphens (no dots/underscores), since it feeds Azure resource naming rules."
+      }
+    },
+    "boomiUsername": {
+      "type": "string",
+      "metadata": { "description": "Boomi API username." }
+    },
+    "boomiPassword": {
+      "type": "securestring",
+      "metadata": { "description": "Boomi API password." }
+    },
+    "boomiBaseUrl": {
+      "type": "string",
+      "defaultValue": "https://api.boomi.com",
+      "metadata": { "description": "Boomi platform API base URL. Use the GB endpoint here if your account is in that region." }
+    },
+    "logCategory": {
+      "type": "string",
+      "metadata": { "description": "Comma-separated list of Boomi AuditLog 'type' values to ingest, e.g. account,as.atom" }
+    },
+    "queryWindowMinutes": {
+      "type": "int",
+      "defaultValue": 10,
+      "metadata": { "description": "Sliding window size in minutes. Should match the timer schedule in function_app.py." }
+    },
+    "workspaceResourceId": {
+      "type": "string",
+      "metadata": { "description": "Full resource ID of the EXISTING Log Analytics workspace, e.g. /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.OperationalInsights/workspaces/{name}" }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "packageUrl": {
+      "type": "string",
+      "metadata": { "description": "Direct download URL to the deployment zip (e.g. a GitHub Release asset URL). Must contain host.json at the ZIP ROOT, not inside a subfolder." }
+    }
+  },
+  "variables": {
+    "functionAppName": "[concat('Boomi-', parameters('accountId'), '-func')]",
+    "appServicePlanName": "[concat('Boomi-', parameters('accountId'), '-plan')]",
+    "storageAccountName": "[toLower(take(concat('boomi', uniqueString(resourceGroup().id, parameters('accountId'))), 24))]",
+    "appInsightsName": "[concat('Boomi-', parameters('accountId'), '-ai')]",
+    "dceName": "[concat('Boomi-', parameters('accountId'), '-dce')]",
+    "dcrName": "[concat('Boomi-', parameters('accountId'), '-dcr')]",
+    "tableName": "BoomiAppAuditEvents_CL",
+    "streamName": "Custom-BoomiAppEvents",
+    "workspaceName": "[last(split(parameters('workspaceResourceId'), '/'))]",
+    "monitoringMetricsPublisherRoleId": "3913510d-42f4-4e42-8a64-420c390055eb",
+    "tableColumns": [
+      { "name": "AuditLogProperty", "type": "dynamic" },
+      { "name": "TimeGenerated", "type": "datetime" },
+      { "name": "accountId", "type": "string" },
+      { "name": "action", "type": "string" },
+      { "name": "containerId", "type": "string" },
+      { "name": "documentId", "type": "string" },
+      { "name": "level", "type": "string" },
+      { "name": "message", "type": "string" },
+      { "name": "modifier", "type": "string" },
+      { "name": "source", "type": "string" },
+      { "name": "EventType", "type": "string" },
+      { "name": "userId", "type": "string" },
+      { "name": "EventTime", "type": "datetime" }
+    ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[concat(variables('workspaceName'), '/', variables('tableName'))]",
+      "properties": {
+        "schema": {
+          "name": "[variables('tableName')]",
+          "columns": "[variables('tableColumns')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionEndpoints",
+      "apiVersion": "2022-06-01",
+      "name": "[variables('dceName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "networkAcls": {
+          "publicNetworkAccess": "Enabled"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2022-06-01",
+      "name": "[variables('dcrName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', variables('workspaceName'), variables('tableName'))]"
+      ],
+      "properties": {
+        "dataCollectionEndpointId": "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName'))]",
+        "streamDeclarations": {
+          "[variables('streamName')]": {
+            "columns": "[variables('tableColumns')]"
+          }
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "workspaceResourceId": "[parameters('workspaceResourceId')]",
+              "name": "logAnalyticsDest"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": ["[variables('streamName')]"],
+            "destinations": ["logAnalyticsDest"],
+            "outputStream": "[concat('Custom-', variables('tableName'))]"
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[parameters('workspaceResourceId')]"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS" },
+      "kind": "StorageV2",
+      "properties": {
+        "minimumTlsVersion": "TLS1_2",
+        "supportsHttpsTrafficOnly": true,
+        "allowBlobPublicAccess": false
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Y1", "tier": "Dynamic" },
+      "kind": "linux",
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('functionAppName')]",
+      "location": "[parameters('location')]",
+      "kind": "functionapp,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName'))]",
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "linuxFxVersion": "PYTHON|3.11",
+          "appSettings": [
+            { "name": "FUNCTIONS_EXTENSION_VERSION", "value": "~4" },
+            { "name": "FUNCTIONS_WORKER_RUNTIME", "value": "python" },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2022-09-01').keys[0].value, ';EndpointSuffix=core.windows.net')]"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').InstrumentationKey]"
+            },
+            {
+              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+            },
+            { "name": "BOOMI_BASE_URL", "value": "[parameters('boomiBaseUrl')]" },
+            { "name": "BOOMI_ACCOUNT_ID", "value": "[parameters('accountId')]" },
+            { "name": "BOOMI_USERNAME", "value": "[parameters('boomiUsername')]" },
+            { "name": "BOOMI_PASSWORD", "value": "[parameters('boomiPassword')]" },
+            { "name": "LOG_CATEGORY", "value": "[parameters('logCategory')]" },
+            { "name": "QUERY_WINDOW_MINUTES", "value": "[string(parameters('queryWindowMinutes'))]" },
+            {
+              "name": "DCE_ENDPOINT",
+              "value": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName')), '2022-06-01').logsIngestion.endpoint]"
+            },
+            {
+              "name": "DCR_IMMUTABLE_ID",
+              "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), '2022-06-01').immutableId]"
+            },
+            { "name": "DCR_STREAM_NAME", "value": "[variables('streamName')]" },
+            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "[parameters('packageUrl')]" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), variables('functionAppName'), variables('monitoringMetricsPublisherRoleId'))]",
+      "scope": "[concat('Microsoft.Insights/dataCollectionRules/', variables('dcrName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]",
+        "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisherRoleId'))]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2022-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ],
+  "outputs": {
+    "functionAppName": {
+      "type": "string",
+      "value": "[variables('functionAppName')]"
+    },
+    "dceEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('dceName')), '2022-06-01').logsIngestion.endpoint]"
+    },
+    "dcrImmutableId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), '2022-06-01').immutableId]"
+    }
+  }
+}
