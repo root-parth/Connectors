@@ -208,24 +208,9 @@
               "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), '2022-06-01').immutableId]"
             },
             { "name": "DCR_STREAM_NAME", "value": "[variables('streamName')]" },
-            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "https://raw.githubusercontent.com/root-parth/Connectors/refs/heads/main/FunctionApp/BoomiApplication/BoomiApplication-main.zip" }
+            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "https://github.com/root-parth/RandomFunctionApp/raw/refs/heads/main/boomi-connector-deploy-packagev2.zip" }
           ]
         }
-      }
-    },
-    {
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName')), variables('functionAppName'), variables('monitoringMetricsPublisherRoleId'))]",
-      "scope": "[concat('Microsoft.Insights/dataCollectionRules/', variables('dcrName'))]",
-      "dependsOn": [
-        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('dcrName'))]",
-        "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
-      ],
-      "properties": {
-        "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisherRoleId'))]",
-        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2022-03-01', 'full').identity.principalId]",
-        "principalType": "ServicePrincipal"
       }
     }
   ],
