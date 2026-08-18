@@ -40,8 +40,8 @@
     }
   },
   "variables": {
-    "functionAppName": "[concat('Boomi-', parameters('accountId'), '-func')]",
-    "appServicePlanName": "[concat('Boomi-', parameters('accountId'), '-plan')]",
+    "functionAppName": "[concat('SentinelBoomi-', parameters('accountId'), '-func')]",
+    "appServicePlanName": "[concat('SentinelBoomi-', parameters('accountId'), '-plan')]",
     "storageAccountName": "[toLower(take(concat('boomi', uniqueString(resourceGroup().id, parameters('accountId'))), 24))]",
     "appInsightsName": "[concat('Boomi-', parameters('accountId'), '-ai')]",
     "dceName": "BoomiApp-DCE",
